@@ -3,30 +3,33 @@
 # References:
 # https://en.wikipedia.org/wiki/CHIP-8
 # http://devernay.free.fr/hacks/chip8/C8TECH10.HTM#0.1
-# https://www.chip-8.com/
 # https://storage.googleapis.com/wzukusers/user-34724694/documents/9265a537ce884412b347ffb476a0f929/CHIP-8%20Classic%20Manual%20Rev%201.7.pdf
-# https://www.chip-8.com/info
+# https://pyglet.readthedocs.io/en/latest/
+# https://chip-8.github.io/links/
+# https://www.zophar.net/pdroms/chip8/chip-8-games-pack.html for the ROMs
 
-import pygame
 import random
+import pyglet
+import sys
 
-KEY_MAP = {pygame.K_1: 0x1,
-            pygame.K_2: 0x2,
-            pygame.K_3: 0x3,
-            pygame.K_4: 0xc,
-            pygame.K_q: 0x4,
-            pygame.K_w: 0x5,
-            pygame.K_e: 0x6,
-            pygame.K_r: 0xd,
-            pygame.K_a: 0x7,
-            pygame.K_s: 0x8,
-            pygame.K_d: 0x9,
-            pygame.K_f: 0xe,
-            pygame.K_z: 0xa,
-            pygame.K_x: 0,
-            pygame.K_c: 0xb,
-            pygame.K_v: 0xf
-           }
+KEY_MAP = {pyglet.window.key._1: 0x1,
+           pyglet.window.key._2: 0x2,
+           pyglet.window.key._3: 0x3,
+           pyglet.window.key._4: 0xc,
+           pyglet.window.key.Q: 0x4,
+           pyglet.window.key.W: 0x5,
+           pyglet.window.key.E: 0x6,
+           pyglet.window.key.R: 0xd,
+           pyglet.window.key.A: 0x7,
+           pyglet.window.key.S: 0x8,
+           pyglet.window.key.D: 0x9,
+           pyglet.window.key.F: 0xe,
+           pyglet.window.key.Z: 0xa,
+           pyglet.window.key.X: 0x0,
+           pyglet.window.key.C: 0xb,
+           pyglet.window.key.V: 0xf
+          }
+
 
 FONTS = [0xF0, 0x90, 0x90, 0x90, 0xF0, # 0
          0x20, 0x60, 0x20, 0x20, 0x70, # 1
@@ -62,8 +65,7 @@ class Logger:
         if(self.should_log):
             print(f"[ERROR] {string}")
 
-class Emulator:
-    window = pygame.display.set_mode((640, 320))
+class Emulator(pyglet.window.Window):
     program_counter = 0
     keys = []
     memory = []
@@ -83,6 +85,9 @@ class Emulator:
     vy = 0
     sprites = []
     function_map = None
+    batch = None
+
+    pixel = pyglet.resource.image('pixel.png')
 
     # Operation functions
     def _0000(self):
@@ -92,33 +97,17 @@ class Emulator:
         except:
             self.logger.warn(f"Uknown instruction: {self.operation_code}")
 
-    def _EXXX(self):
-        extracted_operation = self.operation_code & 0xF0FF
-        try:
-            self.function_map[extracted_operation]()
-        except:
-            self.logger.warn(f"Uknown instruction: {self.operation_code}")
-
-    def _FXXX(self):
-        extracted_operation = self.operation_code & 0xF0FF
-        try:
-            self.function_map[extracted_operation]()
-        except:
-            self.logger.warn(f"Uknown instruction: {self.operation_code}")
-
     def _8XXX(self):
-        extracted_operation = self.operation_code & 0xF0FF
+        extracted_operation = self.operation_code & 0xF00F
+        extracted_operation += 0xFF0
         try:
             self.function_map[extracted_operation]()
         except:
             self.logger.warn(f"Uknown instruction: {self.operation_code}")
 
     def _9XXX(self):
-        extracted_operation = self.operation_code & 0xF0FF
-        try:
-            self.function_map[extracted_operation]()
-        except:
-            self.logger.warn(f"Uknown instruction: {self.operation_code}")
+        if self.registers[self.vx] != self.registers[self.vy]:
+            self.program_counter += 2
 
     def _00E0(self):
         self.logger.info("Cleared screen")
@@ -254,6 +243,13 @@ class Emulator:
             row += 1
         self.should_draw = True
 
+    def _EXXX(self):
+        extracted_operation = self.operation_code & 0xF00F
+        try:
+            self.function_map[extracted_operation]()
+        except:
+            self.logger.warn(f"Uknown instruction: {self.operation_code}")
+
     def _EX9E(self):
         key_pressed = self.registers[self.vx] & 0xF
         if self.keys[key_pressed] == 1:
@@ -263,6 +259,13 @@ class Emulator:
         key_pressed = self.registers[self.vx] & 0xF
         if self.keys[key_pressed] == 0:
             self.program_counter += 2
+    
+    def _FXXX(self):
+        extracted_operation = self.operation_code & 0xF0FF
+        try:
+            self.function_map[extracted_operation]()
+        except:
+            self.logger.warn(f"Uknown instruction: {self.operation_code}")
 
     def _FX07(self):
         self.registers[self.vx] = self.delay_timer
@@ -281,7 +284,7 @@ class Emulator:
         self.sound_timer = self.registers[self.vx]
 
     def _FX1E(self):
-        self.index += self.index + self.registers[self.vx]
+        self.index += self.registers[self.vx]
         if self.index > 0xFFF:
             self.registers[0xF] = 1
             self.index &= 0xFFF
@@ -313,9 +316,74 @@ class Emulator:
 
         self.index += self.vx + 1
 
-    def __init__(self):
-        super(Emulator, self).__init__()
-        
+    # def __init__(self, *args, **kwargs):
+    #     super(Emulator, self).__init__(*args, **kwargs)
+
+    def init(self):
+        self.clear()
+
+        # The program counter which will be used
+        # to execute instructions from memory.
+        # We're offsetting the program counter 
+        # by 512 bytes because the first 512
+        # bytes are where the original interpreter
+        # was located 
+        self.program_counter = 0x200 # 512 in decimal
+
+        # Memory or RAM of 4096 bytes or 4 kilobytes.
+        # Everything in memory will be represented by
+        # a hexadecimal number since each instruction
+        # will be 8 bits (8 bits * 4096)
+        self.memory = [0] * 4096
+
+        # 16 16-bit registers
+        self.registers = [0] * 16
+
+        # 64 x 32 display
+        self.display_buffer = [0] * 64 * 32
+
+        # The stack
+        self.stack = []
+
+        # Keys
+        self.keys = [0] * 16
+
+        # 16 key inputs
+        self.inputs = [0] * 16
+
+        # Operation code
+        self.operation_code = 0
+
+        # Register index
+        self.index = 0
+
+        # A delay timer
+        self.delay_timer = 0
+
+        # Sound timer
+        self.sound_timer = 0
+
+        # Drawing
+        self.should_draw = 0
+
+        # Logging messages
+        self.logger = Logger(False)
+
+        # State of the emulator
+        self.running = True
+
+        # 2 general registers
+        self.vx = 0
+        self.vy = 0
+
+        self.batch = pyglet.graphics.Batch()
+
+        for i in range(0, 2048):
+            self.sprites.append(pyglet.sprite.Sprite(self.pixel, batch = self.batch))
+
+        for i in range(0, 80):
+            self.memory[i] = FONTS[i]
+            
         self.function_map = {
                     0x0000: self._0000,
                     0x00e0: self._00E0,
@@ -357,121 +425,31 @@ class Emulator:
                     0xF065: self._FX65
                     }
 
-    def init(self):
-        self.clear()
-
-        # The program counter which will be used
-        # to execute instructions from memory.
-        # We're offsetting the program counter 
-        # by 512 bytes because the first 512
-        # bytes are where the original interpreter
-        # was located 
-        self.program_counter = 0x200 # 512 in decimal
-
-        # Memory or RAM of 4096 bytes or 4 kilobytes.
-        # Everything in memory will be represented by
-        # a hexadecimal number since each instruction
-        # will be 8 bits (8 bits * 4096)
-        self.memory = [0] * 4096
-
-        # 16 16-bit registers
-        self.registers = [0] * 16
-
-        # 64 x 32 display
-        self.display_buffer = [0] * 64 * 32
-
-        # The stack
-        self.stack = []
-
-        # Keys
-        self.keys = [] * 16
-
-        # 16 key inputs
-        self.inputs = [0] * 16
-
-        # Operation code
-        self.operation_code = 0
-
-        # Register index
-        self.index = 0
-
-        # A delay timer
-        self.delay_timer = 0
-
-        # Sound timer
-        self.sound_timer = 0
-
-        # Drawing
-        self.should_draw = 0
-
-        # Logging messages
-        self.logger = Logger(False)
-
-        # State of the emulator
-        self.running = True
-
-        # 2 general registers
-        self.vx = 0
-        self.vy = 0
-
-        for i in range(0, 2048):
-            tmp = 0
-            self.sprites.append(pygame.rect.Rect(0, 0, 10, 10))
-
-        while i < 80:
-            self.memory[i] = FONTS[i]
-            i += 1
-    
-    def clear(self):
-        pass
-
     def load(self, rom_path):
         self.logger.info(f"Loading {rom_path}")
-        chip_8_binary = open(rom_path, "rb").read() # for reading binary files
-        iteration = 0
-        while iteration < len(chip_8_binary):
-            self.memory[iteration + 0x200] = chip_8_binary[iteration]
-            iteration += 1
-
-    def handle_events(self):
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                self.running = False
-
-            if event.type == pygame.KEYDOWN:
-                try:
-                    if event.key in KEY_MAP.keys():
-                        self.keys[KEY_MAP[event.key]] = 1
-                        if self.key_wait:
-                            self.key_wait = False
-                except:
-                    self.logger.error("Uknown key")
-
-            if event.type == pygame.KEYUP:
-                try:
-                    if event.key in KEY_MAP.keys():
-                        self.keys[KEY_MAP[event.key]] = 0
-                except:
-                    self.logger.error("Uknown key")
+        chip_8_binary_file = open(rom_path, "rb") # for reading binary files
+        chip_8_binary_data = chip_8_binary_file.read()
+        for i in range(len(chip_8_binary_data)):
+            self.memory[i + 0x200] = chip_8_binary_data[i]
 
     def render(self):
         if self.should_draw:
-            for sprite in self.sprites:
-                pygame.draw.rect(self.window, (255, 255, 255), sprite)
-
             iteration = 0
-            while iteration < 2048:
-                if self.display_buffer[iteration] == 1:
-                    self.sprites[iteration].x = (iteration % 64) * 10
-                    self.sprites[iteration].y = 310 - ((iteration / 64) * 10)
-                iteration += 1
+            for i in range(0, 2048):
+                if self.display_buffer[i] == 1:
+                    self.sprites[i].x = (i % 64) * 10
+                    self.sprites[i].y = 310 - ((i / 64) * 10)
+                    self.sprites[i].batch = self.batch
 
-            pygame.display.flip()
+                else:
+                    self.sprites[i].batch = None
+
             self.clear()
+            self.batch.draw()
+            self.flip()
             self.should_draw = False
 
     def cycle(self):
-        pass
         self.operation_code = (self.memory[self.program_counter] << 8) | self.memory[self.program_counter + 1]
         self.logger.info(f"operation code: {self.operation_code}")
 
@@ -490,41 +468,45 @@ class Emulator:
             self.delay_timer -= 1
         
         if self.sound_timer > 0:
-            self.sound.timer -= 1
+            self.sound_timer -= 1
             
             if self.sound_timer == 0:
                 pass
 
-    # def on_key_pressed(self, key, mod):
-    #     self.logger.info(f"{key} pressed")
-    #     if key in KEY_MAP.keys():
-    #         self.keys[KEY_MAP[key]] = 1
-    #         if self.key_wait:
-    #             self.key_wait = False
-    #     else:
-    #         super(Emulator, self).on_key_pressed(key, mod)
+    def on_key_press(self, key, mod):
+        self.logger.info(f"{key} pressed")
+        if key in KEY_MAP.keys():
+            self.keys[KEY_MAP[key]] = 1
+            if self.key_wait:
+                self.key_wait = False
 
-    # def on_key_released(self, key, mod):
-    #     self.logger.info(f"{key} pressed")
-    #     if key in KEY_MAP.keys():
-    #         self.keys[KEY_MAP[key]] = 0
+        elif key == pyglet.window.key.ESCAPE:
+            self.close()
+
+    def on_key_release(self, key, mod):
+        self.logger.info(f"{key} pressed")
+        if key in KEY_MAP.keys():
+            self.keys[KEY_MAP[key]] = 0
+
+    def on_close(self):
+        self.running = False
 
     def get_key(self):
         i = 0
         while i < 16:
-            if self.keys[i]:
+            if self.keys[i] == 1:
                 return i
             i += 1
         return -1
 
     def main_loop(self):
         self.init()
-        self.load("INVADERS")
+        self.load(sys.argv[1])
         while(self.running):
-            self.handle_events()
-            self.render()
+            self.dispatch_events()
             self.cycle()
+            self.render()
 
 if __name__ == "__main__":
-    emulator = Emulator()
+    emulator = Emulator(640, 320)
     emulator.main_loop()
