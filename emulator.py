@@ -65,7 +65,12 @@ class Logger:
         if(self.should_log):
             print(f"[ERROR] {string}")
 
-class Emulator(pyglet.window.Window):
+class Emulator():
+    window = None
+    
+    def __init__(self, window_width, window_height):
+        self.window = pyglet.window.Window(window_width, window_height)
+
     program_counter = 0
     keys = []
     memory = []
@@ -316,11 +321,8 @@ class Emulator(pyglet.window.Window):
 
         self.index += self.vx + 1
 
-    # def __init__(self, *args, **kwargs):
-    #     super(Emulator, self).__init__(*args, **kwargs)
-
     def init(self):
-        self.clear()
+        self.window.clear()
 
         # The program counter which will be used
         # to execute instructions from memory.
@@ -425,6 +427,11 @@ class Emulator(pyglet.window.Window):
                     0xF065: self._FX65
                     }
 
+        
+        self.window.push_handlers(self.on_key_press)
+        self.window.push_handlers(self.on_key_release)
+        self.window.push_handlers(self.on_close)
+
     def load(self, rom_path):
         self.logger.info(f"Loading {rom_path}")
         chip_8_binary_file = open(rom_path, "rb") # for reading binary files
@@ -434,7 +441,6 @@ class Emulator(pyglet.window.Window):
 
     def render(self):
         if self.should_draw:
-            iteration = 0
             for i in range(0, 2048):
                 if self.display_buffer[i] == 1:
                     self.sprites[i].x = (i % 64) * 10
@@ -444,9 +450,9 @@ class Emulator(pyglet.window.Window):
                 else:
                     self.sprites[i].batch = None
 
-            self.clear()
+            self.window.clear()
             self.batch.draw()
-            self.flip()
+            self.window.flip()
             self.should_draw = False
 
     def cycle(self):
@@ -491,19 +497,18 @@ class Emulator(pyglet.window.Window):
     def on_close(self):
         self.running = False
 
+
     def get_key(self):
-        i = 0
-        while i < 16:
+        for i in range(0, 16):
             if self.keys[i] == 1:
                 return i
-            i += 1
         return -1
 
     def main_loop(self):
         self.init()
         self.load(sys.argv[1])
         while(self.running):
-            self.dispatch_events()
+            self.window.dispatch_events()
             self.cycle()
             self.render()
 
